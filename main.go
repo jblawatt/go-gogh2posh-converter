@@ -19,6 +19,24 @@ import (
 // https://technet.microsoft.com/en-us/library/cc957408.aspx
 // https://github.com/Mayccoll/Gogh
 
+// Color
+// 0 - Black
+// 1 - Blue
+// 2 - Green
+// 3 - Aqua
+// 4 - Red
+// 5 - Purple
+// 6 - Yellow
+// 7 - White
+// 8 - Gray
+// 9 - Light Blue
+// A - Light Green
+// B - Light Aqua
+// C - Light Red
+// D - Light Purple
+// E - Light Yellow
+// F - Bright White
+
 // PSColors is the type where the options are parsed in.
 type PSColors struct {
 	ColorTable00 string
@@ -38,7 +56,6 @@ type PSColors struct {
 	ColorTable13 string
 	ColorTable14 string
 	ColorTable15 string
-	ColorTable16 string
 
 	ScreenColors string
 	PopupColors  string
@@ -60,7 +77,6 @@ func createRegFileContent(colors PSColors) (string, error) {
 	temp.Parse(`Windows Registry Editor Version 5.00
 ; generated file
 [HKEY_CURRENT_USER\Console]
-"GoPoshThemeName"="helloworld"
 "ColorTable00"=dword:{{.ColorTable00}}
 "ColorTable01"=dword:{{.ColorTable01}}
 "ColorTable02"=dword:{{.ColorTable02}}
@@ -87,15 +103,18 @@ func createRegFileContent(colors PSColors) (string, error) {
 }
 
 func dwordFromHex(hex string) string {
-	return strings.Join([]string{
+	v := strings.Join([]string{
 		"00",
 		hex[4:6],
 		hex[2:4],
 		hex[0:2],
 	}, "")
+	return strings.ToUpper(v)
 }
 
-func parseInputContent(in io.Reader) PSColors {
+type GoghExtractor struct{}
+
+func (e *GoghExtractor) Extract(in io.Reader) PSColors {
 
 	scanner := bufio.NewScanner(in)
 
@@ -137,8 +156,9 @@ func parseInputContent(in io.Reader) PSColors {
 	}
 
 	if fgIndex == "" {
-		colors.SetValue("ColorTable09", dwordFromHex(fgValue))
-		fgIndex = "9"
+		fgPos := 5
+		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(fgPos), 10), "0", 2), dwordFromHex(fgValue))
+		fgIndex = strconv.FormatInt(int64(fgPos), 16)
 	}
 
 	bgIndex := ""
@@ -151,8 +171,9 @@ func parseInputContent(in io.Reader) PSColors {
 	}
 
 	if bgIndex == "" {
-		colors.SetValue("ColorTable10", dwordFromHex(bgValue))
-		bgIndex = "a"
+		bgPos := 6
+		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(bgPos), 10), "0", 2), dwordFromHex(bgValue))
+		bgIndex = strconv.FormatInt(int64(bgPos), 16)
 	}
 
 	colors.SetValue("ScreenColors", padLeft(bgIndex+fgIndex, "0", 8))
@@ -171,6 +192,10 @@ func padLeft(str, pad string, lenght int) string {
 	}
 }
 
+type Extractor interface {
+	Extract(in io.Reader) PSColors
+}
+
 func main() {
 	var inFile string
 	var outFile string
@@ -185,6 +210,10 @@ func main() {
 	flag.StringVar(&goghTheme, "goghTheme", "", "Gogh Theme. Will be loaded from the internet.")
 
 	flag.Parse()
+
+	extractors := map[string]Extractor{
+		"gogh": &GoghExtractor{},
+	}
 
 	if logFile != "" {
 		logWriter, _ := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
@@ -224,7 +253,7 @@ func main() {
 		inReader = httpResp.Body
 	}
 
-	colors := parseInputContent(inReader)
+	colors := extractors["gogh"].Extract(inReader)
 	regContent, _ := createRegFileContent(colors)
 
 	fmt.Fprint(outWriter, regContent)
