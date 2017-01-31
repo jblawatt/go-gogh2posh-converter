@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/go-ini/ini"
 	"io"
 	"log"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 
 // https://technet.microsoft.com/en-us/library/cc957408.aspx
 // https://github.com/Mayccoll/Gogh
+// https://github.com/mbadolato/iTerm2-Color-Schemes
 
 // Color
 // 0 - Black - x
@@ -206,6 +209,84 @@ type Extractor interface {
 	Extract(in io.Reader, fgColorIndex int, bgColorIndex int) PSColors
 }
 
+type KonsoleExtractor struct{}
+
+func (e *KonsoleExtractor) Extract(in io.Reader, fgColorIndex int, bgColorIndex int) PSColors {
+	colors := PSColors{}
+	iniSource, _ := ini.Load(in)
+	for i := 0; i < 8; i++ {
+		for _, suff := range []string{"", "Intense"} {
+			sectionKey := "Color" + strconv.FormatInt(int64(i), 10) + suff
+			sec, _ := iniSource.GetSection(sectionKey)
+			key, _ := sec.GetKey("Color")
+			val := key.String()
+			parts := strings.Split(val, ",")
+			a, _ := strconv.Atoi(parts[0])
+			b, _ := strconv.Atoi(parts[1])
+			c, _ := strconv.Atoi(parts[2])
+
+			hexVal := hex.EncodeToString([]byte{
+				byte(a),
+				byte(b),
+				byte(c),
+			})
+			var v int
+			if suff == "Intense" {
+				v = i + 8
+			} else {
+				v = i
+			}
+
+			colors.SetValue(
+				"ColorTable"+padLeft(strconv.FormatInt(int64(v), 10), "0", 2),
+				dwordFromHex(hexVal))
+		}
+	}
+
+	var sec *ini.Section
+	var key *ini.Key
+	var parts []string
+	sec, _ = iniSource.GetSection("Foreground")
+	key, _ = sec.GetKey("Color")
+	parts = strings.Split(key.String(), ",")
+
+	var a, _ = strconv.Atoi(parts[0])
+	var b, _ = strconv.Atoi(parts[1])
+	var c, _ = strconv.Atoi(parts[2])
+
+	hexVal := hex.EncodeToString([]byte{
+		byte(a),
+		byte(b),
+		byte(c),
+	})
+
+	colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(fgColorIndex), 10), "0", 2), dwordFromHex(hexVal))
+
+	sec, _ = iniSource.GetSection("Background")
+	key, _ = sec.GetKey("Color")
+	parts = strings.Split(key.String(), ",")
+	a, _ = strconv.Atoi(parts[0])
+	b, _ = strconv.Atoi(parts[1])
+	c, _ = strconv.Atoi(parts[2])
+
+	hexVal = hex.EncodeToString([]byte{
+		byte(a),
+		byte(b),
+		byte(c),
+	})
+
+	colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(bgColorIndex), 10), "0", 2), dwordFromHex(hexVal))
+
+	fgIndex := strconv.FormatInt(int64(fgColorIndex), 16)
+	bgIndex := strconv.FormatInt(int64(bgColorIndex), 16)
+
+	colors.SetValue("ScreenColors", padLeft(bgIndex+fgIndex, "0", 8))
+	colors.SetValue("PopupColors", padLeft(fgIndex+bgIndex, "0", 8))
+
+	return colors
+
+}
+
 func main() {
 	var inFile string
 	var outFile string
@@ -215,6 +296,7 @@ func main() {
 
 	var fgColorTableIndex int
 	var bgColorTableIndex int
+	var extractorKey string
 
 	flag.StringVar(&inFile, "inFile", "", "die datei die geparsed werden soll.")
 	flag.StringVar(&outFile, "out", "", "Ausgabedatei. Default os.Stdout")
@@ -223,11 +305,13 @@ func main() {
 	flag.StringVar(&goghTheme, "goghTheme", "", "Gogh Theme. Will be loaded from the internet.")
 	flag.IntVar(&fgColorTableIndex, "fgColorIndex", 1, "Foreground color table index.")
 	flag.IntVar(&bgColorTableIndex, "bgColorIndex", 4, "Foreground color table index.")
+	flag.StringVar(&extractorKey, "extractor", "gogh", "...")
 
 	flag.Parse()
 
 	extractors := map[string]Extractor{
-		"gogh": &GoghExtractor{},
+		"gogh":    &GoghExtractor{},
+		"konsole": &KonsoleExtractor{},
 	}
 
 	if logFile != "" {
@@ -268,7 +352,7 @@ func main() {
 		inReader = httpResp.Body
 	}
 
-	colors := extractors["gogh"].Extract(inReader, fgColorTableIndex, bgColorTableIndex)
+	colors := extractors[extractorKey].Extract(inReader, fgColorTableIndex, bgColorTableIndex)
 	regContent, _ := createRegFileContent(colors)
 
 	fmt.Fprint(outWriter, regContent)
