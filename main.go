@@ -20,22 +20,34 @@ import (
 // https://github.com/Mayccoll/Gogh
 
 // Color
-// 0 - Black
+// 0 - Black - x
 // 1 - Blue
-// 2 - Green
-// 3 - Aqua
-// 4 - Red
-// 5 - Purple
-// 6 - Yellow
+// 2 - Green - x (Git Diff)
+// 3 - Aqua - x (Literal) (ProgressBackgroundColor)
+// 4 - Red - x
+// 5 - Purple /// - x (Text Color)
+// 6 - Yellow - x
 // 7 - White
-// 8 - Gray
+// 8 - Gray - x (Parameter) (Sign)
 // 9 - Light Blue
-// A - Light Green
+// A - Light Green - x (Reserved Word)
 // B - Light Aqua
-// C - Light Red
+// C - Light Red - x (Error (Red))
 // D - Light Purple
-// E - Light Yellow
+// E - Light Yellow - x (Command / Warning)
 // F - Bright White
+
+// $ (Get-Host).PrivateData
+// ErrorForegroundColor    : Red
+// ErrorBackgroundColor    : Black
+// WarningForegroundColor  : Yellow
+// WarningBackgroundColor  : Black
+// DebugForegroundColor    : Yellow
+// DebugBackgroundColor    : Black
+// VerboseForegroundColor  : Yellow
+// VerboseBackgroundColor  : Black
+// ProgressForegroundColor : Yellow
+// ProgressBackgroundColor : DarkCyan
 
 // PSColors is the type where the options are parsed in.
 type PSColors struct {
@@ -114,7 +126,7 @@ func dwordFromHex(hex string) string {
 
 type GoghExtractor struct{}
 
-func (e *GoghExtractor) Extract(in io.Reader) PSColors {
+func (e *GoghExtractor) Extract(in io.Reader, fgColorIndex int, bgColorIndex int) PSColors {
 
 	scanner := bufio.NewScanner(in)
 
@@ -156,9 +168,8 @@ func (e *GoghExtractor) Extract(in io.Reader) PSColors {
 	}
 
 	if fgIndex == "" {
-		fgPos := 5
-		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(fgPos), 10), "0", 2), dwordFromHex(fgValue))
-		fgIndex = strconv.FormatInt(int64(fgPos), 16)
+		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(fgColorIndex), 10), "0", 2), dwordFromHex(fgValue))
+		fgIndex = strconv.FormatInt(int64(fgColorIndex), 16)
 	}
 
 	bgIndex := ""
@@ -171,9 +182,8 @@ func (e *GoghExtractor) Extract(in io.Reader) PSColors {
 	}
 
 	if bgIndex == "" {
-		bgPos := 6
-		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(bgPos), 10), "0", 2), dwordFromHex(bgValue))
-		bgIndex = strconv.FormatInt(int64(bgPos), 16)
+		colors.SetValue("ColorTable"+padLeft(strconv.FormatInt(int64(bgColorIndex), 10), "0", 2), dwordFromHex(bgValue))
+		bgIndex = strconv.FormatInt(int64(bgColorIndex), 16)
 	}
 
 	colors.SetValue("ScreenColors", padLeft(bgIndex+fgIndex, "0", 8))
@@ -193,7 +203,7 @@ func padLeft(str, pad string, lenght int) string {
 }
 
 type Extractor interface {
-	Extract(in io.Reader) PSColors
+	Extract(in io.Reader, fgColorIndex int, bgColorIndex int) PSColors
 }
 
 func main() {
@@ -203,11 +213,16 @@ func main() {
 	var logFile string
 	var goghTheme string
 
+	var fgColorTableIndex int
+	var bgColorTableIndex int
+
 	flag.StringVar(&inFile, "inFile", "", "die datei die geparsed werden soll.")
 	flag.StringVar(&outFile, "out", "", "Ausgabedatei. Default os.Stdout")
 	flag.StringVar(&inURL, "inURL", "", "Load From URL https://mayccoll.github.io/Gogh/")
 	flag.StringVar(&logFile, "logFile", "", "Log File")
 	flag.StringVar(&goghTheme, "goghTheme", "", "Gogh Theme. Will be loaded from the internet.")
+	flag.IntVar(&fgColorTableIndex, "fgColorIndex", 1, "Foreground color table index.")
+	flag.IntVar(&bgColorTableIndex, "bgColorIndex", 4, "Foreground color table index.")
 
 	flag.Parse()
 
@@ -253,7 +268,7 @@ func main() {
 		inReader = httpResp.Body
 	}
 
-	colors := extractors["gogh"].Extract(inReader)
+	colors := extractors["gogh"].Extract(inReader, fgColorTableIndex, bgColorTableIndex)
 	regContent, _ := createRegFileContent(colors)
 
 	fmt.Fprint(outWriter, regContent)
